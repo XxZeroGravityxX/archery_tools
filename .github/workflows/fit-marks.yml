@@ -24,11 +24,8 @@ on:
           - projectile_range_model
           - flexible_sine_model
         default: compound_bow_mark_model
-      correction_velocity:
-        description: "Multiplicative mark correction for an arrow speed change (blank = none)"
-        default: ""
-      correction_angle:
-        description: "Additive angular correction in radians for a sight move (blank = none)"
+      correction:
+        description: "Reference shots as MODE,OLD_MARK,OLD_DISTANCE,NEW_MARK[,NEW_DISTANCE], e.g. angle,3.4,30,3.2 (blank = none)"
         default: ""
       start:
         description: "First distance to evaluate, in meters (must be > 0)"
@@ -68,8 +65,7 @@ jobs:
           MARKS: ${{ inputs.marks }}
           MODE: ${{ inputs.mode }}
           MODEL: ${{ inputs.model }}
-          CORRECTION_VELOCITY: ${{ inputs.correction_velocity }}
-          CORRECTION_ANGLE: ${{ inputs.correction_angle }}
+          CORRECTION: ${{ inputs.correction }}
           START: ${{ inputs.start }}
           END: ${{ inputs.end }}
           STEP: ${{ inputs.step }}
@@ -86,11 +82,8 @@ jobs:
             --step "$STEP"
             --output-path output
           )
-          if [[ -n "$CORRECTION_VELOCITY" ]]; then
-            args+=(--correction-velocity "$CORRECTION_VELOCITY")
-          fi
-          if [[ -n "$CORRECTION_ANGLE" ]]; then
-            args+=(--correction-angle "$CORRECTION_ANGLE")
+          if [[ -n "$CORRECTION" ]]; then
+            args+=(--correction "$CORRECTION")
           fi
           read -ra extra <<< "$EXTRA_ARGS"
           bash ./fit_marks.sh "${args[@]}" "${extra[@]}" | tee fit_marks.log

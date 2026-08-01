@@ -15,8 +15,7 @@ P0="10.0,0.02,2.0"
 LOWER="0,0,-inf"
 UPPER="inf,inf,inf"
 MAXFEV=""
-CORRECTION_ANGLE=""
-CORRECTION_VELOCITY=""
+CORRECTION=""
 START="1"
 END="50"
 STEP="1"
@@ -35,9 +34,9 @@ Usage:
   ${SCRIPT_NAME} [options]
 
 Data options:
-  --distances LIST     Comma-separated target distances in meters.
+  -d, --distances LIST Comma-separated target distances in meters.
                        (default: ${DISTANCES})
-  --marks LIST         Comma-separated measured sight marks, one per distance.
+  -m, --marks LIST     Comma-separated measured sight marks, one per distance.
                        (default: ${MARKS})
   --mode MODE          Fitting strategy: 'curve_fit' or 'polynomial'.
                        (default: ${MODE})
@@ -57,13 +56,18 @@ Data options:
   --maxfev N           Max curve_fit function evaluations. Unset means SciPy's
                        own default.
 
-Correction options (applied to the evaluated marks, not to the fit):
-  --correction-velocity F
-                       Multiplicative factor on the mark, for an arrow speed
-                       change. Applied before the angular offset.
-  --correction-angle F
-                       Additive angular offset in radians, for a peep or sight
-                       move. Its effect on the mark scales with distance.
+Correction options:
+  -c, --correction LIST
+                       A reference shot taken before and after a bow change,
+                       as MODE,OLD_MARK,OLD_DISTANCE,NEW_MARK[,NEW_DISTANCE].
+                       The correction is computed from the two shots and
+                       applied to the evaluated marks. MODE is 'angle' for a
+                       peep or sight move (additive offset) or 'velocity' for
+                       an arrow speed change (multiplicative factor).
+                       NEW_DISTANCE defaults to OLD_DISTANCE; in 'angle' mode
+                       both shots must be at the same distance for the offset
+                       to be meaningful. Omit the flag to skip the correction.
+                       Example: -c angle,3.4,30,3.2
 
 Evaluation options:
   --start N            First distance to evaluate, in meters. Keep it above 0:
@@ -88,9 +92,9 @@ Output options:
 
 Examples:
   ${SCRIPT_NAME}
-  ${SCRIPT_NAME} --distances 18,30,50 --marks 2.6,3.4,5.1 --end 60
+  ${SCRIPT_NAME} -d 18,30,50 -m 2.6,3.4,5.1 --end 60
   ${SCRIPT_NAME} --mode polynomial --degree 2 --no-plot
-  ${SCRIPT_NAME} --correction-velocity 0.97 --correction-angle 0.0015
+  ${SCRIPT_NAME} -c angle,3.4,30,3.2
   ${SCRIPT_NAME} --output-path plots --output-fname session01 --output-fext svg
 EOF
 }
@@ -109,8 +113,8 @@ while [[ $# -gt 0 ]]; do
     fi
 
     case "$1" in
-        --distances) require_value "$1" "${2:-}"; DISTANCES="$2"; shift 2 ;;
-        --marks) require_value "$1" "${2:-}"; MARKS="$2"; shift 2 ;;
+        -d|--distances) require_value "$1" "${2:-}"; DISTANCES="$2"; shift 2 ;;
+        -m|--marks) require_value "$1" "${2:-}"; MARKS="$2"; shift 2 ;;
         --mode) require_value "$1" "${2:-}"; MODE="$2"; shift 2 ;;
         --degree) require_value "$1" "${2:-}"; DEGREE="$2"; shift 2 ;;
         --model) require_value "$1" "${2:-}"; MODEL="$2"; shift 2 ;;
@@ -118,8 +122,7 @@ while [[ $# -gt 0 ]]; do
         --lower) require_value "$1" "${2:-}"; LOWER="$2"; shift 2 ;;
         --upper) require_value "$1" "${2:-}"; UPPER="$2"; shift 2 ;;
         --maxfev) require_value "$1" "${2:-}"; MAXFEV="$2"; shift 2 ;;
-        --correction-angle) require_value "$1" "${2:-}"; CORRECTION_ANGLE="$2"; shift 2 ;;
-        --correction-velocity) require_value "$1" "${2:-}"; CORRECTION_VELOCITY="$2"; shift 2 ;;
+        -c|--correction) require_value "$1" "${2:-}"; CORRECTION="$2"; shift 2 ;;
         --start) require_value "$1" "${2:-}"; START="$2"; shift 2 ;;
         --end) require_value "$1" "${2:-}"; END="$2"; shift 2 ;;
         --step) require_value "$1" "${2:-}"; STEP="$2"; shift 2 ;;
@@ -137,7 +140,7 @@ done
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 export DISTANCES MARKS MODE DEGREE MODEL P0 LOWER UPPER MAXFEV \
-    CORRECTION_ANGLE CORRECTION_VELOCITY START END STEP SHOW_PLOT \
+    CORRECTION START END STEP SHOW_PLOT \
     OUTPUT_PATH OUTPUT_FNAME OUTPUT_FEXT FIGSIZE
 
 # Options travel through the environment and are parsed as plain numbers, so no
@@ -192,11 +195,24 @@ lower = floats("LOWER", "--lower")
 upper = floats("UPPER", "--upper")
 bounds = (lower, upper) if lower and upper else (-float("inf"), float("inf"))
 
-correction = {}
-if os.environ["CORRECTION_VELOCITY"].strip():
-    correction["velocity"] = number("CORRECTION_VELOCITY", "--correction-velocity")
-if os.environ["CORRECTION_ANGLE"].strip():
-    correction["angle"] = number("CORRECTION_ANGLE", "--correction-angle")
+correction_mode = "angle"
+correction_shots = [None, None, None, None]
+correction = os.environ["CORRECTION"].strip()
+if correction:
+    parts = [part.strip() for part in correction.split(",")]
+    if len(parts) not in (4, 5):
+        fail(
+            "--correction takes MODE,OLD_MARK,OLD_DISTANCE,NEW_MARK[,NEW_DISTANCE], "
+            f"got {correction!r}"
+        )
+    correction_mode = parts[0]
+    if correction_mode not in ("angle", "velocity"):
+        fail(f"--correction mode must be 'angle' or 'velocity', got {correction_mode!r}")
+    try:
+        values = [float(part) for part in parts[1:]]
+    except ValueError:
+        fail(f"--correction marks and distances must be numbers, got {correction!r}")
+    correction_shots[: len(values)] = values
 
 figsize = floats("FIGSIZE", "--figsize")
 if figsize is None or len(figsize) != 2:
@@ -212,7 +228,11 @@ processor.process_data(
     initial_parameters=floats("P0", "--p0"),
     bounds=bounds,
     maxfev=number("MAXFEV", "--maxfev", int) if os.environ["MAXFEV"].strip() else None,
-    correction=correction or None,
+    correction_mode=correction_mode,
+    correction_old_mark=correction_shots[0],
+    correction_old_distance=correction_shots[1],
+    correction_new_mark=correction_shots[2],
+    correction_new_distance=correction_shots[3],
     start=number("START", "--start"),
     end=number("END", "--end"),
     step=number("STEP", "--step"),

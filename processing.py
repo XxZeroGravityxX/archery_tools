@@ -320,7 +320,11 @@ class DataProcessor:
         initial_parameters=None,
         bounds=(-np.inf, np.inf),
         maxfev=None,
-        correction=None,
+        correction_mode="angle",
+        correction_old_mark=None,
+        correction_old_distance=None,
+        correction_new_mark=None,
+        correction_new_distance=None,
         poly_model=None,
         start=0,
         end=50,
@@ -331,7 +335,40 @@ class DataProcessor:
         output_fext="png",
         figsize=(8, 6),
     ):
-        """Run the fit, evaluation, and optional plotting pipeline."""
+        """Run the fit, correction, evaluation, and optional plotting pipeline.
+
+        The correction is derived here via ``compute_correction`` from the
+        ``correction_*`` arguments. It is skipped unless the old mark, the old
+        distance, and the new mark are all given.
+        """
+        correction = None
+        if any(
+            value is not None
+            for value in (
+                correction_old_mark,
+                correction_old_distance,
+                correction_new_mark,
+            )
+        ):
+            if None in (
+                correction_old_mark,
+                correction_old_distance,
+                correction_new_mark,
+            ):
+                raise ValueError(
+                    "A correction needs correction_old_mark, "
+                    "correction_old_distance and correction_new_mark."
+                )
+            correction_value = compute_correction(
+                old_mark=correction_old_mark,
+                old_distance=correction_old_distance,
+                new_mark=correction_new_mark,
+                new_distance=correction_new_distance,
+                mode=correction_mode,
+            )
+            correction = {correction_mode: correction_value}
+            print(f"Computed Correction ({correction_mode}): {correction_value}")
+
         if poly_model is not None:
             self.poly_model = poly_model
 
