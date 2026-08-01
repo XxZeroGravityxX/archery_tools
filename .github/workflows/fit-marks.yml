@@ -1,0 +1,115 @@
+name: Fit sight marks
+
+on:
+  workflow_dispatch:
+    inputs:
+      distances:
+        description: "Comma-separated target distances in meters"
+        required: true
+        default: "10,20,30"
+      marks:
+        description: "Comma-separated measured sight marks, one per distance"
+        required: true
+        default: "2.5,2.7,3.4"
+      mode:
+        description: "Fitting strategy"
+        type: choice
+        options: [curve_fit, polynomial]
+        default: curve_fit
+      model:
+        description: "Model function (curve_fit mode only)"
+        type: choice
+        options:
+          - compound_bow_mark_model
+          - projectile_range_model
+          - flexible_sine_model
+        default: compound_bow_mark_model
+      correction_velocity:
+        description: "Multiplicative mark correction for an arrow speed change (blank = none)"
+        default: ""
+      correction_angle:
+        description: "Additive angular correction in radians for a sight move (blank = none)"
+        default: ""
+      start:
+        description: "First distance to evaluate, in meters (must be > 0)"
+        default: "1"
+      end:
+        description: "Last distance to evaluate, in meters"
+        default: "50"
+      step:
+        description: "Distance increment in meters"
+        default: "1"
+      extra_args:
+        description: "Extra fit_marks.sh flags, e.g. --degree 2 --p0 10,0.02,2 --output-fname session01"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  fit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install numpy scipy matplotlib
+
+      - name: Run fit_marks.sh
+        env:
+          # Inputs are passed through the environment, never interpolated into
+          # the shell command, so they cannot be executed as code.
+          MPLBACKEND: Agg
+          DISTANCES: ${{ inputs.distances }}
+          MARKS: ${{ inputs.marks }}
+          MODE: ${{ inputs.mode }}
+          MODEL: ${{ inputs.model }}
+          CORRECTION_VELOCITY: ${{ inputs.correction_velocity }}
+          CORRECTION_ANGLE: ${{ inputs.correction_angle }}
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+          STEP: ${{ inputs.step }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+        run: |
+          set -euo pipefail
+          args=(
+            --distances "$DISTANCES"
+            --marks "$MARKS"
+            --mode "$MODE"
+            --model "$MODEL"
+            --start "$START"
+            --end "$END"
+            --step "$STEP"
+            --output-path output
+          )
+          if [[ -n "$CORRECTION_VELOCITY" ]]; then
+            args+=(--correction-velocity "$CORRECTION_VELOCITY")
+          fi
+          if [[ -n "$CORRECTION_ANGLE" ]]; then
+            args+=(--correction-angle "$CORRECTION_ANGLE")
+          fi
+          read -ra extra <<< "$EXTRA_ARGS"
+          bash ./fit_marks.sh "${args[@]}" "${extra[@]}" | tee fit_marks.log
+
+      - name: Summarize run
+        if: always()
+        run: |
+          {
+            echo '### Fitted marks'
+            echo '```'
+            tail -n 60 fit_marks.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fit-marks-${{ github.run_id }}
+          path: |
+            output/
+            fit_marks.log
+          if-no-files-found: warn
