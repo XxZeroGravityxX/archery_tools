@@ -59,15 +59,13 @@ Data options:
 Correction options:
   -c, --correction LIST
                        A reference shot taken before and after a bow change,
-                       as MODE,OLD_MARK,OLD_DISTANCE,NEW_MARK[,NEW_DISTANCE].
-                       The correction is computed from the two shots and
-                       applied to the evaluated marks. MODE is 'angle' for a
-                       peep or sight move (additive offset) or 'velocity' for
-                       an arrow speed change (multiplicative factor).
-                       NEW_DISTANCE defaults to OLD_DISTANCE; in 'angle' mode
-                       both shots must be at the same distance for the offset
-                       to be meaningful. Omit the flag to skip the correction.
-                       Example: -c angle,3.4,30,3.2
+                       as MODE,DISTANCE,OLD_MARK,NEW_MARK. Both marks must come
+                       from the same DISTANCE. The correction is computed from
+                       them and applied to the evaluated marks. MODE is 'angle'
+                       for a peep or sight move (additive offset) or 'velocity'
+                       for an arrow speed change (multiplicative factor).
+                       Omit the flag to skip the correction.
+                       Example: -c angle,30,3.4,3.2
 
 Evaluation options:
   --start N            First distance to evaluate, in meters. Keep it above 0:
@@ -94,7 +92,7 @@ Examples:
   ${SCRIPT_NAME}
   ${SCRIPT_NAME} -d 18,30,50 -m 2.6,3.4,5.1 --end 60
   ${SCRIPT_NAME} --mode polynomial --degree 2 --no-plot
-  ${SCRIPT_NAME} -c angle,3.4,30,3.2
+  ${SCRIPT_NAME} -c angle,30,3.4,3.2
   ${SCRIPT_NAME} --output-path plots --output-fname session01 --output-fext svg
 EOF
 }
@@ -196,23 +194,22 @@ upper = floats("UPPER", "--upper")
 bounds = (lower, upper) if lower and upper else (-float("inf"), float("inf"))
 
 correction_mode = "angle"
-correction_shots = [None, None, None, None]
+correction_shots = [None, None, None]
 correction = os.environ["CORRECTION"].strip()
 if correction:
     parts = [part.strip() for part in correction.split(",")]
-    if len(parts) not in (4, 5):
+    if len(parts) != 4:
         fail(
-            "--correction takes MODE,OLD_MARK,OLD_DISTANCE,NEW_MARK[,NEW_DISTANCE], "
+            "--correction takes MODE,DISTANCE,OLD_MARK,NEW_MARK, "
             f"got {correction!r}"
         )
     correction_mode = parts[0]
     if correction_mode not in ("angle", "velocity"):
         fail(f"--correction mode must be 'angle' or 'velocity', got {correction_mode!r}")
     try:
-        values = [float(part) for part in parts[1:]]
+        correction_shots = [float(part) for part in parts[1:]]
     except ValueError:
-        fail(f"--correction marks and distances must be numbers, got {correction!r}")
-    correction_shots[: len(values)] = values
+        fail(f"--correction distance and marks must be numbers, got {correction!r}")
 
 figsize = floats("FIGSIZE", "--figsize")
 if figsize is None or len(figsize) != 2:
@@ -229,10 +226,9 @@ processor.process_data(
     bounds=bounds,
     maxfev=number("MAXFEV", "--maxfev", int) if os.environ["MAXFEV"].strip() else None,
     correction_mode=correction_mode,
-    correction_old_mark=correction_shots[0],
-    correction_old_distance=correction_shots[1],
+    correction_distance=correction_shots[0],
+    correction_old_mark=correction_shots[1],
     correction_new_mark=correction_shots[2],
-    correction_new_distance=correction_shots[3],
     start=number("START", "--start"),
     end=number("END", "--end"),
     step=number("STEP", "--step"),

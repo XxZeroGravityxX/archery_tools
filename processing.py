@@ -92,32 +92,27 @@ def compound_bow_mark_model(
 
 # Mark corrections
 def compute_correction(
+    distance,
     old_mark,
-    old_distance,
     new_mark,
-    new_distance=None,
     mode="angle",
 ):
     """Return the correction value that maps old sight marks onto new ones.
 
-    Both marks are first normalized into angle space (``mark / distance``),
+    Both marks must come from the same ``distance``, otherwise the
+    distance-dependent ballistic part of the angle would leak into the
+    correction. They are normalized into angle space (``mark / distance``) and
     then compared according to ``mode``:
 
     - ``"angle"``: peep/sight movement is a constant angular offset, so the
-      correction is the difference ``new_angle - old_angle``. This only
-      isolates the offset when both marks were taken at the *same* distance,
-      because the ballistic part of the angle is distance-dependent.
+      correction is the difference ``new_angle - old_angle``.
     - ``"velocity"``: a speed change scales the angle by ``(v0 / v1) ** 2``
       under the small-angle approximation, so the correction is the quotient
-      ``new_angle / old_angle`` and is distance-independent.
+      ``new_angle / old_angle``.
     """
-    new_distance = old_distance if new_distance is None else new_distance
-    old_angle = np.asarray(old_mark, dtype=float) / np.asarray(
-        old_distance, dtype=float
-    )
-    new_angle = np.asarray(new_mark, dtype=float) / np.asarray(
-        new_distance, dtype=float
-    )
+    distance = np.asarray(distance, dtype=float)
+    old_angle = np.asarray(old_mark, dtype=float) / distance
+    new_angle = np.asarray(new_mark, dtype=float) / distance
 
     if mode == "angle":
         return new_angle - old_angle
@@ -321,10 +316,9 @@ class DataProcessor:
         bounds=(-np.inf, np.inf),
         maxfev=None,
         correction_mode="angle",
+        correction_distance=None,
         correction_old_mark=None,
-        correction_old_distance=None,
         correction_new_mark=None,
-        correction_new_distance=None,
         poly_model=None,
         start=0,
         end=50,
@@ -338,32 +332,25 @@ class DataProcessor:
         """Run the fit, correction, evaluation, and optional plotting pipeline.
 
         The correction is derived here via ``compute_correction`` from the
-        ``correction_*`` arguments. It is skipped unless the old mark, the old
-        distance, and the new mark are all given.
+        ``correction_*`` arguments. It is skipped unless the distance and both
+        marks are given.
         """
         correction = None
-        if any(
-            value is not None
-            for value in (
-                correction_old_mark,
-                correction_old_distance,
-                correction_new_mark,
-            )
-        ):
-            if None in (
-                correction_old_mark,
-                correction_old_distance,
-                correction_new_mark,
-            ):
+        correction_arguments = (
+            correction_distance,
+            correction_old_mark,
+            correction_new_mark,
+        )
+        if any(value is not None for value in correction_arguments):
+            if None in correction_arguments:
                 raise ValueError(
-                    "A correction needs correction_old_mark, "
-                    "correction_old_distance and correction_new_mark."
+                    "A correction needs correction_distance, "
+                    "correction_old_mark and correction_new_mark."
                 )
             correction_value = compute_correction(
+                distance=correction_distance,
                 old_mark=correction_old_mark,
-                old_distance=correction_old_distance,
                 new_mark=correction_new_mark,
-                new_distance=correction_new_distance,
                 mode=correction_mode,
             )
             correction = {correction_mode: correction_value}
