@@ -1,4 +1,6 @@
 # Import modules
+import functools
+import inspect
 import os
 
 import matplotlib.pyplot as plt
@@ -28,25 +30,49 @@ def flexible_sine_model(x, A, B):
     return A * np.sin(B * x)
 
 
-def projectile_range_model(distance, v0, g=9.81):
+def projectile_range_model(distance, v0, g=9.81, beta=0.0):
     """Return the expected scope mark for a target at ``distance`` meters.
 
-    Derivation (small-angle scope, ballistic range formula):
+    Derivation (small-angle scope, ballistic range formula on a slope).
+    ``distance`` is the slant range measured along the line of sight and
+    ``beta`` is the slope angle of that line of sight above the horizontal.
+    With ``theta`` the launch angle above the horizontal, the range along the
+    slope is:
 
-        mark  ~=  distance * angle                   (small-angle scope)
-        R      =  (v0**2 / g) * sin(2 * angle)       (ballistic range)
+        R = 2 * v0**2 * cos(theta) * sin(theta - beta) / (g * cos(beta)**2)
 
-    Solving the second equation for the launch angle and substituting:
+    Using ``2 * cos(theta) * sin(theta - beta) = sin(2*theta - beta) - sin(beta)``
+    and solving for the angle between the arrow and the line of sight,
+    ``angle = theta - beta``:
 
-        angle  =  0.5 * arcsin(distance * g / v0**2)
-        mark   =  distance * 0.5 * arcsin(distance * g / v0**2)
+        angle = 0.5 * (arcsin(R * g * cos(beta)**2 / v0**2 + sin(beta)) - beta)
+        mark  = R * angle                             (small-angle scope)
 
-    ``v0`` is the free parameter; ``g`` defaults to 9.81 m/s^2 but can be
-    overridden (e.g. fixed via ``functools.partial`` before passing to
-    ``curve_fit``, or fitted jointly if left in the signature). ``arcsin``
-    requires ``distance * g / v0**2 <= 1``, i.e. ``v0 >= sqrt(distance * g)``.
+    At ``beta = 0`` this collapses to the flat-ground form
+    ``mark = distance * 0.5 * arcsin(distance * g / v0**2)``.
+
+    ``v0`` is the free parameter; ``g`` defaults to 9.81 m/s^2 and ``beta`` to
+    a level shot. Both are meant to be fixed before fitting (see
+    ``bind_slope_angle``) rather than fitted. ``arcsin`` requires
+    ``distance * g * cos(beta)**2 / v0**2 <= 1 - sin(beta)``.
+
+    Parameters
+    ----------
+    distance : float or array
+        Slant range to the target in meters, along the line of sight.
+    v0 : float
+        Effective initial arrow speed in m/s (fitted).
+    g : float
+        Gravitational acceleration, defaults to 9.81 m/s^2.
+    beta : float
+        Slope angle of the line of sight in degrees, positive uphill and
+        negative downhill. Defaults to 0 (level shot).
     """
-    angle_rad = 0.5 * np.arcsin(distance * g / v0**2)
+    beta_rad = np.radians(beta)
+    angle_rad = 0.5 * (
+        np.arcsin(distance * g * np.cos(beta_rad) ** 2 / v0**2 + np.sin(beta_rad))
+        - beta_rad
+    )
     return distance * angle_rad
 
 
@@ -56,24 +82,32 @@ def compound_bow_mark_model(
     eye_offset,
     sight_baseline,
     g=9.81,
+    beta=0.0,
 ):
     """Return the expected scope mark for a compound bow at ``distance`` meters.
 
     Extends the plain ballistic ``projectile_range_model`` with the sight
     geometry of a bow-mounted sight, where the archer's eye is offset
     (vertically and forward) from the arrow launch line. Under small-angle
-    approximations (level target, small elevation angle, sight bar much
-    shorter than target distance), the mark on the sight tape decomposes
-    into three additive contributions:
+    approximations (small elevation angle, sight bar much shorter than target
+    distance), the mark on the sight tape decomposes into three additive
+    contributions:
 
-        mark(d) ≈  g * d / (2 * v0**2)      (ballistic drop term, grows with d)
-                  + eye_offset / d          (sight-geometry term, dominates at short d)
-                  + sight_baseline          (fixed pin-to-arrow offset)
+        mark(d) ≈  g * d * cos(beta) / (2 * v0**2)
+                                      (ballistic drop term, grows with d)
+                  + eye_offset / d    (sight-geometry term, dominates at short d)
+                  + sight_baseline    (fixed pin-to-arrow offset)
+
+    The ``cos(beta)`` factor is the small-angle limit of the slope-corrected
+    launch angle in ``projectile_range_model``, i.e. the classic rule that an
+    inclined shot needs the mark of its *horizontal* distance. The sight
+    geometry term is measured along the line of sight, so the slope leaves it
+    unchanged.
 
     Parameters
     ----------
     distance : float or array
-        Horizontal distance to the target in meters (same elevation).
+        Slant range to the target in meters, along the line of sight.
     v0 : float
         Effective initial arrow speed in m/s (fitted).
     eye_offset : float
@@ -84,10 +118,38 @@ def compound_bow_mark_model(
         Constant sight-tape offset in the same units as ``mark`` (fitted).
     g : float
         Gravitational acceleration, defaults to 9.81 m/s^2.
+    beta : float
+        Slope angle of the line of sight in degrees, positive uphill and
+        negative downhill. Defaults to 0 (level shot).
     """
-    ballistic_term = g * distance / (2 * v0**2)
+    ballistic_term = g * distance * np.cos(np.radians(beta)) / (2 * v0**2)
     geometric_term = eye_offset / distance
     return ballistic_term + geometric_term + sight_baseline
+
+
+def accepts_slope_angle(model_function):
+    """Return whether ``model_function`` takes a ``beta`` slope angle."""
+    try:
+        return "beta" in inspect.signature(model_function).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def bind_slope_angle(model_function, beta=0.0):
+    """Return ``model_function`` with its ``beta`` slope angle fixed.
+
+    Binding the slope after fitting keeps it separate from fitted parameters
+    such as velocity. A level shot (``beta`` of 0) already matches the model
+    defaults, so the function is returned untouched.
+    """
+    if model_function is None or not beta:
+        return model_function
+
+    if not accepts_slope_angle(model_function):
+        name = getattr(model_function, "__name__", repr(model_function))
+        raise ValueError(f"Model {name} does not accept a 'beta' slope angle.")
+
+    return functools.partial(model_function, beta=beta)
 
 
 # Mark corrections
@@ -171,8 +233,16 @@ class DataProcessor:
         initial_parameters=None,
         bounds=(-np.inf, np.inf),
         maxfev=None,
+        beta=0.0,
     ):
-        """Fit and store a polynomial or SciPy curve model."""
+        """Fit and store a polynomial or SciPy curve model.
+
+        ``beta`` is the slope angle of the line of sight in degrees (positive
+        uphill, negative downhill). Curve parameters are fitted against the
+        level-shot model, then ``beta`` is bound to the stored model for
+        evaluation. This prevents the optimizer from absorbing the slope into
+        velocity and only applies to ``mode='curve_fit'``.
+        """
         self.data_distances = np.asarray(data_distances)
         self.data_marks = np.asarray(data_marks)
 
@@ -185,6 +255,7 @@ class DataProcessor:
         elif mode == "curve_fit":
             if model_function is None:
                 model_function = flexible_sine_model
+            evaluated_model_function = bind_slope_angle(model_function, beta)
             curve_fit_arguments = {
                 "f": model_function,
                 "xdata": self.data_distances,
@@ -197,7 +268,7 @@ class DataProcessor:
 
             parameters, covariance = curve_fit(**curve_fit_arguments)
             self.poly_model = CurveFitModel(
-                model_function=model_function,
+                model_function=evaluated_model_function,
                 parameters=parameters,
                 covariance=covariance,
             )
@@ -246,12 +317,24 @@ class DataProcessor:
             return f"polynomial_deg{model.degree()}"
         return type(model).__name__
 
+    @staticmethod
+    def _title_extras(textra):
+        """Return ``textra`` rendered as a ``" (name=value, ...)"`` title suffix."""
+        if not textra:
+            return ""
+        pairs = ", ".join(
+            f"{name}={value:g}" if isinstance(value, float) else f"{name}={value}"
+            for name, value in textra.items()
+        )
+        return f" ({pairs})"
+
     def plot_data(
         self,
         data_distances=None,
         data_marks=None,
         plot_distances=None,
         plot_marks=None,
+        textra=None,
         output_path=".",
         output_fname="fit_model_plot",
         output_fext="png",
@@ -259,8 +342,9 @@ class DataProcessor:
     ):
         """Plot explicit data or data produced by previous method calls.
 
-        The image is written to
-        ``output_path/output_fname.<model name>.output_fext``.
+        ``textra`` is a mapping of extra values to annotate the title with, so
+        ``{"beta": 3}`` renders as ``... — model_name (beta=3)``. The image is
+        written to ``output_path/output_fname.<model name>.output_fext``.
         """
         data_distances = (
             self.data_distances if data_distances is None else data_distances
@@ -294,7 +378,7 @@ class DataProcessor:
             color="blue",
             label=f"Fitted Model",
         )
-        ax.set_title(f"Fitted Model Plot — {model_name}")
+        ax.set_title(f"Fitted Model Plot — {model_name}{self._title_extras(textra)}")
         ax.set_xlabel("Distance")
         ax.set_ylabel("Mark")
         ax.legend()
@@ -315,6 +399,7 @@ class DataProcessor:
         initial_parameters=None,
         bounds=(-np.inf, np.inf),
         maxfev=None,
+        beta=0.0,
         correction_mode="angle",
         correction_distance=None,
         correction_old_mark=None,
@@ -324,6 +409,7 @@ class DataProcessor:
         end=50,
         step=1,
         show_plot=True,
+        textra=None,
         output_path=".",
         output_fname="fit_model_plot",
         output_fext="png",
@@ -333,7 +419,9 @@ class DataProcessor:
 
         The correction is derived here via ``compute_correction`` from the
         ``correction_*`` arguments. It is skipped unless the distance and both
-        marks are given.
+        marks are given. ``beta`` is the slope angle of the line of sight in
+        degrees applied after fitting the level-shot curve; slope-aware curve
+        models also get it added to the ``textra`` plot title annotations.
         """
         correction = None
         correction_arguments = (
@@ -369,6 +457,7 @@ class DataProcessor:
                 initial_parameters=initial_parameters,
                 bounds=bounds,
                 maxfev=maxfev,
+                beta=beta,
             )
         else:
             self.data_distances = np.asarray(data_distances)
@@ -383,11 +472,15 @@ class DataProcessor:
         )
 
         if show_plot:
+            title_extras = dict(textra) if textra else {}
+            if mode == "curve_fit" and accepts_slope_angle(model_function):
+                title_extras.setdefault("beta", beta)
             self.plot_data(
                 data_distances=self.data_distances,
                 data_marks=self.data_marks,
                 plot_distances=self.plot_distances,
                 plot_marks=self.plot_marks,
+                textra=title_extras,
                 output_path=output_path,
                 output_fname=output_fname,
                 output_fext=output_fext,

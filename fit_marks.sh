@@ -15,6 +15,7 @@ P0="10.0,0.02,2.0"
 LOWER="0,0,-inf"
 UPPER="inf,inf,inf"
 MAXFEV=""
+BETA="0"
 CORRECTION=""
 START="1"
 END="50"
@@ -55,6 +56,11 @@ Data options:
                        (default: ${UPPER})
   --maxfev N           Max curve_fit function evaluations. Unset means SciPy's
                        own default.
+  -b, --beta DEG       Slope angle of the line of sight in degrees, positive
+                       uphill and negative downhill. Distances are then read as
+                       slant ranges along that line of sight. Applied to the
+                       fitted level-shot curve in --mode curve_fit.
+                       (default: ${BETA})
 
 Correction options:
   -c, --correction LIST
@@ -92,6 +98,7 @@ Examples:
   ${SCRIPT_NAME}
   ${SCRIPT_NAME} -d 18,30,50 -m 2.6,3.4,5.1 --end 60
   ${SCRIPT_NAME} --mode polynomial --degree 2 --no-plot
+  ${SCRIPT_NAME} -b 15
   ${SCRIPT_NAME} -c angle,30,3.4,3.2
   ${SCRIPT_NAME} --output-path plots --output-fname session01 --output-fext svg
 EOF
@@ -120,6 +127,7 @@ while [[ $# -gt 0 ]]; do
         --lower) require_value "$1" "${2:-}"; LOWER="$2"; shift 2 ;;
         --upper) require_value "$1" "${2:-}"; UPPER="$2"; shift 2 ;;
         --maxfev) require_value "$1" "${2:-}"; MAXFEV="$2"; shift 2 ;;
+        -b|--beta) require_value "$1" "${2:-}"; BETA="$2"; shift 2 ;;
         -c|--correction) require_value "$1" "${2:-}"; CORRECTION="$2"; shift 2 ;;
         --start) require_value "$1" "${2:-}"; START="$2"; shift 2 ;;
         --end) require_value "$1" "${2:-}"; END="$2"; shift 2 ;;
@@ -138,7 +146,7 @@ done
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 export DISTANCES MARKS MODE DEGREE MODEL P0 LOWER UPPER MAXFEV \
-    CORRECTION START END STEP SHOW_PLOT \
+    BETA CORRECTION START END STEP SHOW_PLOT \
     OUTPUT_PATH OUTPUT_FNAME OUTPUT_FEXT FIGSIZE
 
 # Options travel through the environment and are parsed as plain numbers, so no
@@ -225,6 +233,7 @@ processor.process_data(
     initial_parameters=floats("P0", "--p0"),
     bounds=bounds,
     maxfev=number("MAXFEV", "--maxfev", int) if os.environ["MAXFEV"].strip() else None,
+    beta=number("BETA", "--beta"),
     correction_mode=correction_mode,
     correction_distance=correction_shots[0],
     correction_old_mark=correction_shots[1],
