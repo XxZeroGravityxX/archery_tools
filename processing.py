@@ -10,26 +10,18 @@ import numpy as np
 from numpy.polynomial.polynomial import Polynomial
 from scipy.optimize import curve_fit
 
+# Functions
 
-# Curve fit model
-class CurveFitModel:
-    """Store a curve function and its optimized SciPy parameters."""
-
-    def __init__(self, model_function, parameters, covariance):
-        self.model_function = model_function
-        self.parameters = parameters
-        self.covariance = covariance
-
-    def __call__(self, x):
-        return self.model_function(x, *self.parameters)
+## Curve models
 
 
-# Sample curve models
+### Sine model (simple approximation)
 def flexible_sine_model(x, A, B):
     """Return a sine curve with amplitude A and angular frequency B."""
     return A * np.sin(B * x)
 
 
+### Ballistic model (small-angle scope approximation)
 def projectile_range_model(distance, v0, g=9.81, beta=0.0):
     """Return the expected scope mark for a target at ``distance`` meters.
 
@@ -76,6 +68,7 @@ def projectile_range_model(distance, v0, g=9.81, beta=0.0):
     return distance * angle_rad
 
 
+### Extended ballistic model for compound bows (small-angle scope approximation)
 def compound_bow_mark_model(
     distance,
     v0,
@@ -127,6 +120,7 @@ def compound_bow_mark_model(
     return ballistic_term + geometric_term + sight_baseline
 
 
+## Slope angle utilities
 def accepts_slope_angle(model_function):
     """Return whether ``model_function`` takes a ``beta`` slope angle."""
     try:
@@ -152,7 +146,7 @@ def bind_slope_angle(model_function, beta=0.0):
     return functools.partial(model_function, beta=beta)
 
 
-# Mark corrections
+## Mark corrections
 def compute_correction(
     distance,
     old_mark,
@@ -212,7 +206,23 @@ def apply_correction(distances, marks, correction):
     return corrected_marks
 
 
-# Data processor
+# Classes
+
+
+## Curve fitting
+class CurveFitModel:
+    """Store a curve function and its optimized SciPy parameters."""
+
+    def __init__(self, model_function, parameters, covariance):
+        self.model_function = model_function
+        self.parameters = parameters
+        self.covariance = covariance
+
+    def __call__(self, x):
+        return self.model_function(x, *self.parameters)
+
+
+## Data processing
 class DataProcessor:
     """Fit, evaluate, and plot polynomial or curve-fitted data."""
 

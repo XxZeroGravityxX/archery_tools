@@ -149,8 +149,6 @@ export DISTANCES MARKS MODE DEGREE MODEL P0 LOWER UPPER MAXFEV \
     BETA CORRECTION START END STEP SHOW_PLOT \
     OUTPUT_PATH OUTPUT_FNAME OUTPUT_FEXT FIGSIZE
 
-# Options travel through the environment and are parsed as plain numbers, so no
-# argument is ever evaluated as code.
 "$PYTHON_BIN" - <<'PY'
 import os
 import sys

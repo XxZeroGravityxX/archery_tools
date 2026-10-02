@@ -49,6 +49,8 @@ permissions:
 jobs:
   fit:
     runs-on: ubuntu-latest
+    # Write collaborators can dispatch/re-run; restrict execution to the personal owner.
+    if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
     steps:
       - uses: actions/checkout@v4
 
@@ -57,12 +59,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install numpy scipy matplotlib
+        run: python -m pip install -r requirements.txt
 
       - name: Run fit_marks.sh
         env:
-          # Inputs are passed through the environment, never interpolated into
-          # the shell command, so they cannot be executed as code.
           MPLBACKEND: Agg
           DISTANCES: ${{ inputs.distances }}
           MARKS: ${{ inputs.marks }}
